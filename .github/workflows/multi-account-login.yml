@@ -1,0 +1,195 @@
+name: ClawCloud 多账号自动登录
+
+on:
+  schedule:
+    - cron: '0 1 */5 * *'  # 每 5 天运行一次
+  workflow_dispatch:
+    inputs:
+      account_id:
+        # 指定账号 ID (留空=运行所有启用的账号)
+        description: ''
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # Job 1: 准备账号矩阵
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      has_accounts: ${{ steps.check.outputs.has_accounts }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 检查配置文件是否存在
+        id: check
+        run: |
+          if [ -f ".github/config/accounts.yml" ]; then
+            echo "has_accounts=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_accounts=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 生成账号矩阵
+        if: steps.check.outputs.has_accounts == 'true'
+        id: set-matrix
+        run: |
+          matrix=$(python3 -c "
+          import yaml, json, sys
+          with open('.github/config/accounts.yml') as f:
+              data = yaml.safe_load(f)
+          accounts = [a for a in data.get('accounts', []) if a.get('enabled')]
+          account_id = '${{ github.event.inputs.account_id }}'
+          if account_id:
+              accounts = [a for a in accounts if a['id'] == account_id]
+          for a in accounts:
+              a['session_key'] = 'GH_SESSION_' + a['id'].upper()
+          print(json.dumps(accounts))
+          ")
+          echo "matrix={\"include\":$matrix}" >> $GITHUB_OUTPUT
+          echo "生成的 matrix:"
+          echo "$matrix" | python3 -m json.tool
+
+  # Job 2: 多账号登录
+  multi-account-login:
+    needs: prepare
+    if: needs.prepare.outputs.has_accounts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 创建 requirements 文件
+        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+
+      - name: 缓存 Playwright 浏览器
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
+      - name: 安装 Python 依赖
+        run: pip install playwright requests pynacl
+
+      - name: 安装 Playwright 浏览器
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium
+
+      - name: 安装 Playwright 系统依赖
+        run: playwright install-deps
+
+      - name: 缓存 Bitwarden CLI
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/node_modules/@bitwarden
+          key: bw-cli-${{ runner.os }}
+
+      - name: 安装 Bitwarden CLI
+        run: npm install -g @bitwarden/cli
+
+      - name: 运行自动登录 - ${{ matrix.display_name }}
+        env:
+          # 账号配置（从 matrix 传入）
+          ACCOUNT_ID: ${{ matrix.id }}
+          DISPLAY_NAME: ${{ matrix.display_name }}
+
+          # Session Secret（动态引用）
+          GH_SESSION: ${{ secrets[matrix.session_key] }}
+
+          # Vaultwarden 配置（所有账号共享）
+          BW_SERVER_URL: ${{ secrets.BW_SERVER_URL }}
+          BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
+          BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+
+          # Telegram 通知（所有账号共享）
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+
+          # 其他配置
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+        run: python scripts/auto_login.py
+
+  # Job 3: 单账号模式（向后兼容）
+  single-account-login:
+    needs: prepare
+    if: needs.prepare.outputs.has_accounts == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 创建 requirements 文件
+        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+
+      - name: 缓存 Playwright 浏览器
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}
+
+      - name: 安装 Python 依赖
+        run: pip install playwright requests pynacl
+
+      - name: 安装 Playwright 浏览器
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        run: playwright install chromium
+
+      - name: 安装 Playwright 系统依赖
+        run: playwright install-deps
+
+      - name: 缓存 Bitwarden CLI
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/node_modules/@bitwarden
+          key: bw-cli-${{ runner.os }}
+
+      - name: 安装 Bitwarden CLI（可选）
+        continue-on-error: true
+        run: npm install -g @bitwarden/cli
+
+      - name: 运行自动登录（单账号模式）
+        env:
+          GH_USERNAME: ${{ secrets.GH_USERNAME }}
+          GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+          GH_SESSION: ${{ secrets.GH_SESSION }}
+
+          # Vaultwarden（可选）
+          BW_SERVER_URL: ${{ secrets.BW_SERVER_URL }}
+          BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
+          BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+
+          # Telegram
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+
+          # 其他
+          REPO_TOKEN: ${{ secrets.REPO_TOKEN }}
+        run: python scripts/auto_login.py

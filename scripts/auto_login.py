@@ -17,6 +17,12 @@ from urllib.parse import urlparse
 import requests
 from playwright.sync_api import sync_playwright
 
+# Vaultwarden 集成
+try:
+    from vaultwarden_client import VaultwardenClient
+except ImportError:
+    VaultwardenClient = None
+
 # ==================== 配置 ====================
 # 代理配置 (留空则不使用)
 # 格式: socks5://user:pass@host:port 或 http://user:pass@host:port
@@ -46,9 +52,9 @@ class Telegram:
                 data={"chat_id": self.chat_id, "text": msg, "parse_mode": "HTML"},
                 timeout=30
             )
-        except:
-            pass
-    
+        except Exception as e:
+            print(f"[Telegram] 发送失败: {e}")
+
     def photo(self, path, caption=""):
         if not self.ok or not os.path.exists(path):
             return
@@ -60,9 +66,9 @@ class Telegram:
                     files={"photo": f},
                     timeout=60
                 )
-        except:
-            pass
-    
+        except Exception as e:
+            print(f"[Telegram] 发送图片失败: {e}")
+
     def flush_updates(self):
         """刷新 offset 到最新，避免读到旧消息"""
         if not self.ok:
@@ -76,7 +82,7 @@ class Telegram:
             data = r.json()
             if data.get("ok") and data.get("result"):
                 return data["result"][-1]["update_id"] + 1
-        except:
+        except Exception:
             pass
         return 0
     
@@ -177,15 +183,32 @@ class AutoLogin:
     """自动登录"""
     
     def __init__(self):
+        # 多账号支持：读取账号 ID
+        self.account_id = os.environ.get('ACCOUNT_ID', '').strip()
+        self.display_name = os.environ.get('DISPLAY_NAME', self.account_id or '默认账号')
+
+        # 初始化 Vaultwarden 客户端
+        self.bw = VaultwardenClient() if VaultwardenClient else None
+        self.bw_item = None  # 存储找到的 Vaultwarden 条目
+
+        # 计算 session key（多账号时使用动态 key）
+        if self.account_id:
+            self.session_key = f"GH_SESSION_{self.account_id.upper()}"
+        else:
+            self.session_key = "GH_SESSION"
+
+        # 从环境变量获取凭据（降级方案）
         self.username = os.environ.get('GH_USERNAME')
         self.password = os.environ.get('GH_PASSWORD')
         self.gh_session = os.environ.get('GH_SESSION', '').strip()
+
+        # 初始化其他组件
         self.tg = Telegram()
         self.secret = SecretUpdater()
         self.shots = []
         self.logs = []
         self.n = 0
-        
+
         # 区域相关
         self.detected_region = 'eu-central-1'  # 检测到的区域，如 "ap-southeast-1"
         self.region_base_url = 'https://eu-central-1.run.claw.cloud'  # 检测到的区域基础 URL
@@ -202,7 +225,7 @@ class AutoLogin:
         try:
             page.screenshot(path=f)
             self.shots.append(f)
-        except:
+        except Exception:
             pass
         return f
     
@@ -218,7 +241,7 @@ class AutoLogin:
                     el.click()
                     self.log(f"已点击: {desc}", "SUCCESS")
                     return True
-            except:
+            except Exception:
                 pass
         return False
     
@@ -276,26 +299,34 @@ class AutoLogin:
             for c in context.cookies():
                 if c['name'] == 'user_session' and 'github' in c.get('domain', ''):
                     return c['value']
-        except:
+        except Exception:
             pass
         return None
     
     def save_cookie(self, value):
-        """保存新 Cookie"""
+        """保存新 Cookie（多账号支持）"""
         if not value:
             return
-        
+
         self.log(f"新 Cookie: {value[:15]}...{value[-8:]}", "SUCCESS")
-        
-        # 自动更新 Secret
-        if self.secret.update('GH_SESSION', value):
-            self.log("已自动更新 GH_SESSION", "SUCCESS")
-            self.tg.send("🔑 <b>Cookie 已自动更新</b>\n\nGH_SESSION 已保存")
+
+        # 多账号：使用动态的 session_key
+        if self.secret.update(self.session_key, value):
+            self.log(f"已自动更新 {self.session_key}", "SUCCESS")
+            msg = f"""🔑 <b>Cookie 已自动更新</b>
+
+账号: {self.display_name}
+用户: {self.username}
+Secret: {self.session_key}"""
+            self.tg.send(msg)
         else:
             # 通过 Telegram 发送
             self.tg.send(f"""🔑 <b>新 Cookie</b>
 
-请更新 Secret <b>GH_SESSION</b> (点击查看):
+账号: {self.display_name}
+用户: {self.username}
+
+请更新 Secret <b>{self.session_key}</b> (点击查看):
 <tg-spoiler>{value}</tg-spoiler>
 """)
             self.log("已通过 Telegram 发送 Cookie", "SUCCESS")
@@ -326,7 +357,7 @@ class AutoLogin:
                 try:
                     page.reload(timeout=10000)
                     page.wait_for_load_state('networkidle', timeout=10000)
-                except:
+                except Exception:
                     pass
         
         if 'verified-device' not in page.url:
@@ -378,7 +409,7 @@ class AutoLogin:
                 try:
                     page.reload(timeout=30000)
                     page.wait_for_load_state('domcontentloaded', timeout=30000)
-                except:
+                except Exception:
                     pass
         
         self.log("两步验证超时", "ERROR")
@@ -432,23 +463,46 @@ class AutoLogin:
                         self.log("已切换到验证码输入页面", "SUCCESS")
                         shot = self.shot(page, "两步验证_code_切换后")
                         break
-                except:
+                except Exception:
                     pass
-        except:
+        except Exception:
             pass
 
-        # 发送提示并等待验证码
-        self.tg.send(f"""🔐 <b>需要验证码登录</b>
+        # 优先从 Vaultwarden 自动获取 TOTP
+        code = None
+        if self.bw and self.bw.available and self.bw_item:
+            self.log("尝试从 Vaultwarden 自动获取 TOTP...", "INFO")
+            totp = self.bw.get_totp_from_item(self.bw_item)
+            if totp:
+                code = totp
+                self.log("✅ 已从 Vaultwarden 自动获取 TOTP", "SUCCESS")
+                self.tg.send(f"""🔑 <b>自动获取验证码</b>
 
-用户{self.username}正在登录，请在 Telegram 里发送：
+账号: {self.display_name}
+用户: {self.username}
+来源: Vaultwarden
+
+验证码已自动填入，无需手动操作。""")
+            else:
+                self.log("⚠️ Vaultwarden TOTP 获取失败", "WARN")
+
+        # 降级：通过 Telegram 手动输入
+        if not code:
+            self.log("降级到 Telegram 手动输入模式", "WARN")
+            self.tg.send(f"""🔐 <b>需要验证码登录</b>
+
+账号: {self.display_name}
+用户: {self.username}
+
+请在 Telegram 里发送：
 <code>/code 你的6位验证码</code>
 
 等待时间：{TWO_FACTOR_WAIT} 秒""")
-        if shot:
-            self.tg.photo(shot, "两步验证页面")
+            if shot:
+                self.tg.photo(shot, "两步验证页面")
 
-        self.log(f"等待验证码（{TWO_FACTOR_WAIT}秒）...", "WARN")
-        code = self.tg.wait_code(timeout=TWO_FACTOR_WAIT)
+            self.log(f"等待验证码（{TWO_FACTOR_WAIT}秒）...", "WARN")
+            code = self.tg.wait_code(timeout=TWO_FACTOR_WAIT)
 
         if not code:
             self.log("等待验证码超时", "ERROR")
@@ -494,7 +548,7 @@ class AutoLogin:
                                 submitted = True
                                 self.log("已点击 Verify 按钮", "SUCCESS")
                                 break
-                        except:
+                        except Exception:
                             pass
 
                     if not submitted:
@@ -515,7 +569,7 @@ class AutoLogin:
                         self.log("验证码可能错误", "ERROR")
                         self.tg.send("❌ <b>验证码可能错误，请检查后重试</b>")
                         return False
-            except:
+            except Exception:
                 pass
 
         self.log("没找到验证码输入框", "ERROR")
@@ -550,7 +604,7 @@ class AutoLogin:
         
         try:
             page.locator('input[type="submit"], button[type="submit"]').first.click()
-        except:
+        except Exception:
             pass
         
         time.sleep(3)
@@ -581,9 +635,9 @@ class AutoLogin:
                 try:
                     page.wait_for_load_state('networkidle', timeout=30000)
                     time.sleep(2)
-                except:
+                except Exception:
                     pass
-            
+
             else:
                 # 其它两步验证方式（TOTP/恢复码等），尝试通过 Telegram 输入验证码
                 if not self.handle_2fa_code_input(page):
@@ -592,18 +646,18 @@ class AutoLogin:
                 try:
                     page.wait_for_load_state('networkidle', timeout=30000)
                     time.sleep(2)
-                except:
+                except Exception:
                     pass
-        
+
         # 错误
         try:
             err = page.locator('.flash-error').first
             if err.is_visible(timeout=2000):
                 self.log(f"错误: {err.inner_text()}", "ERROR")
                 return False
-        except:
+        except Exception:
             pass
-        
+
         return True
     
     def oauth(self, page):
@@ -677,12 +731,14 @@ class AutoLogin:
     def notify(self, ok, err=""):
         if not self.tg.ok:
             return
-        
+
+        # 账号信息
+        account_info = f"\n<b>账号:</b> {self.display_name}" if self.account_id else ""
         region_info = f"\n<b>区域:</b> {self.detected_region or '默认'}" if self.detected_region else ""
-        
+
         msg = f"""<b>🤖 ClawCloud 自动登录</b>
 
-<b>状态:</b> {"✅ 成功" if ok else "❌ 失败"}
+<b>状态:</b> {"✅ 成功" if ok else "❌ 失败"}{account_info}
 <b>用户:</b> {self.username}{region_info}
 <b>时间:</b> {time.strftime('%Y-%m-%d %H:%M:%S')}"""
         
@@ -708,13 +764,43 @@ class AutoLogin:
         print("🚀 ClawCloud 自动登录")
         print("="*50 + "\n")
         
-        self.log(f"用户名: {self.username}")
+        # 多账号信息
+        if self.account_id:
+            self.log(f"账号: {self.display_name} (ID: {self.account_id})", "INFO")
+            self.log(f"Session Secret: {self.session_key}", "INFO")
+
+        self.log(f"用户名: {self.username or '(待从 Vaultwarden 获取)'}")
         self.log(f"Session: {'有' if self.gh_session else '无'}")
-        self.log(f"密码: {'有' if self.password else '无'}")
+        self.log(f"密码: {'有' if self.password else '(待从 Vaultwarden 获取)'}")
         self.log(f"登录入口: {LOGIN_ENTRY_URL}")
-        
+
+        # 尝试从 Vaultwarden 获取凭据
+        if self.bw and self.account_id:
+            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "INFO")
+            self.log("尝试从 Vaultwarden 获取凭据...", "STEP")
+            if self.bw.login():
+                self.log("✅ Vaultwarden 连接成功", "SUCCESS")
+
+                # 通过 account_id 查找条目（优先 Custom Field）
+                username, password, item = self.bw.get_credentials_by_account_id(self.account_id)
+
+                if username and password:
+                    self.username = username
+                    self.password = password
+                    self.bw_item = item
+                    item_name = item.get('name', '未知') if item else '未知'
+                    self.log(f"✅ 已从 Vaultwarden 获取凭据", "SUCCESS")
+                    self.log(f"   条目: {item_name}", "INFO")
+                    self.log(f"   用户: {self.username}", "INFO")
+                else:
+                    self.log(f"⚠️ 未找到账号 {self.account_id} 的凭据", "WARN")
+                    self.log("   回退到环境变量", "WARN")
+            else:
+                self.log("⚠️ Vaultwarden 连接失败，使用环境变量", "WARN")
+            self.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", "INFO")
+
         if not self.username or not self.password:
-            self.log("缺少凭据", "ERROR")
+            self.log("缺少凭据（环境变量和 Vaultwarden 都未提供）", "ERROR")
             self.notify(False, "凭据未配置")
             sys.exit(1)
         
@@ -789,7 +875,7 @@ class AutoLogin:
                             {'name': 'logged_in', 'value': 'yes', 'domain': 'github.com', 'path': '/'}
                         ])
                         self.log("已加载 Session Cookie", "SUCCESS")
-                    except:
+                    except Exception:
                         self.log("加载 Cookie 失败", "WARN")
                 
                 # 1. 访问 ClawCloud 登录入口
@@ -894,6 +980,10 @@ class AutoLogin:
                 self.notify(False, str(e))
                 sys.exit(1)
             finally:
+                # 清理 Vaultwarden 会话
+                if self.bw and self.bw.available:
+                    self.bw.logout()
+
                 browser.close()
 
 

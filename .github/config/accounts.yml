@@ -1,0 +1,44 @@
+# ClawCloud 多账号配置
+# 每个账号通过 account_id 与 Vaultwarden 关联
+
+accounts:
+  # 账号 1 示例
+  - id: acc1                          # 账号唯一标识符（不可变）
+    display_name: "gmail账号"           # 显示名称（用于日志和通知）
+    enabled: true                      # 是否启用
+
+  # # 账号 2 示例
+  # - id: acc2
+  #   display_name: "工作账号"
+  #   enabled: true
+
+  # # 账号 3 示例
+  # - id: acc3
+  #   display_name: "开源账号"
+  #   enabled: true
+
+  # 账号 4 示例（暂时禁用）
+  # - id: acc4
+  #   display_name: "测试账号"
+  #   enabled: false
+
+  # 账号 5 示例（暂时禁用）
+  # - id: acc5
+  #   display_name: "备用账号"
+  #   enabled: false
+
+# 配置说明：
+# 1. id: 账号唯一标识符，必须与 Vaultwarden 中的 Custom Field "account_id" 匹配
+# 2. display_name: 用于日志和 Telegram 通知的显示名称
+# 3. enabled: true 表示启用，false 表示禁用（禁用的账号不会运行）
+#
+# Vaultwarden 配置要求：
+# - 每个 GitHub 账号在 Vaultwarden 中创建一个条目
+# - 必须添加 Custom Field: account_id = {上面的 id}
+# - 条目名称可以随意，推荐使用 "GitHub-{id}" 便于识别
+# - 必须包含: 用户名、密码、TOTP（如果启用了2FA）
+#
+# GitHub Secrets 配置：
+# - GH_SESSION_ACC1, GH_SESSION_ACC2, GH_SESSION_ACC3... （每个账号的 cookie）
+# - BW_SERVER_URL, BW_CLIENTID, BW_CLIENTSECRET, BW_PASSWORD （Vaultwarden 凭据）
+# - TG_BOT_TOKEN, TG_CHAT_ID, REPO_TOKEN （共享配置）
