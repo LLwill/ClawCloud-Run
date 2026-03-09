@@ -83,6 +83,9 @@ class VaultwardenClient:
             print("[VaultwardenClient] 缺少凭据环境变量 (BW_CLIENTID / BW_CLIENTSECRET / BW_PASSWORD)")
             return False
 
+        # 先登出旧会话（清理残留状态，忽略错误）
+        self._run(["logout"])
+
         # 配置服务器地址
         if self.server_url:
             out = self._run(["config", "server", self.server_url])
@@ -90,9 +93,6 @@ class VaultwardenClient:
                 print("[VaultwardenClient] 配置服务器地址失败")
                 return False
             print(f"[VaultwardenClient] 服务器: {self.server_url}")
-
-        # 先登出旧会话（忽略错误）
-        self._run(["logout"])
 
         # API Key 登录
         env_extra = {
