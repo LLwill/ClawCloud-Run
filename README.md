@@ -300,16 +300,108 @@ Authenticator app ✓
 ```
 .
 ├── .github/
+│   ├── config/
+│   │   └── accounts.yml              # 多账号配置
 │   └── workflows/
-│       └── auto_login.yml    # GitHub Actions 配置
+│       ├── keep-alive.yml            # 单账号 Workflow（兼容）
+│       └── multi-account-login.yml   # 多账号 Workflow（推荐）
 ├── scripts/
-│   └── auto_login.py         # 自动登录脚本
-├── 1.png                      # Mobile 验证截图
-├── 2.png                      # 设置截图
-├── 3.png                      # 主截图
-├── 4.png                      # 2FA 截图
+│   ├── auto_login.py                 # 自动登录脚本
+│   └── vaultwarden_client.py         # Vaultwarden 客户端模块
+├── docs/
+│   └── VAULTWARDEN_SETUP.md          # Vaultwarden 配置指南
+├── 1.png                              # Mobile 验证截图
+├── 2.png                              # 设置截图
+├── 3.png                              # 主截图
+├── 4.png                              # 2FA 截图
 └── README.md
 ```
+
+---
+
+## 🔐 进阶：Vaultwarden 全自动化（推荐）
+
+> **实现完全无人值守！无需 Telegram 手动输入验证码**
+
+### ✨ 功能特性
+
+- ✅ **完全自动化**：密码和 2FA 验证码全部自动获取
+- ✅ **多账号支持**：一次配置，管理 3-5 个 GitHub 账号
+- ✅ **安全加密**：所有凭据存储在 Vaultwarden 加密数据库
+- ✅ **智能降级**：Vaultwarden 不可用时自动回退到 Telegram 方式
+
+### 📊 对比
+
+| 功能 | 传统方式 | Vaultwarden 方式 |
+|------|---------|----------------|
+| 密码管理 | 手动配置 Secrets | 自动从 Vaultwarden 获取 |
+| 2FA 验证 | Telegram 手动输入 | 自动生成 TOTP |
+| 多账号 | 需要多个 Secrets | 统一管理，按需启用 |
+| 人工干预 | 每次运行需要输入验证码 | ✅ 完全无人值守 |
+
+### 🚀 快速开始
+
+**1. 在 Vaultwarden 中配置 GitHub 账号：**
+
+```
+条目名称: GitHub-acc1（推荐）
+用户名: your-email@example.com
+密码: your-github-password
+TOTP: otpauth://totp/...（从 GitHub 2FA 获取）
+
+Custom Fields（必填）:
+  account_id (Text) = acc1  ← 核心关联字段！
+```
+
+**2. 添加 GitHub Secrets：**
+
+```
+BW_SERVER_URL = https://vault.example.com
+BW_CLIENTID = user.xxx（API Key）
+BW_CLIENTSECRET = xxx（API Secret）
+BW_PASSWORD = your-master-password
+
+GH_SESSION_ACC1 = (自动生成，首次可不设置)
+```
+
+**3. 创建账号配置文件：**
+
+创建 `.github/config/accounts.yml`:
+
+```yaml
+accounts:
+  - id: acc1
+    display_name: "个人账号"
+    enabled: true
+
+  - id: acc2
+    display_name: "工作账号"
+    enabled: true
+```
+
+**4. 启用多账号 Workflow：**
+
+使用 `.github/workflows/multi-account-login.yml` 即可！
+
+### 📖 详细文档
+
+完整的配置指南请查看：[Vaultwarden 配置文档](docs/VAULTWARDEN_SETUP.md)
+
+包含：
+- Vaultwarden 服务器搭建
+- API Key 获取方法
+- TOTP 种子配置
+- 多账号完整示例
+- 故障排查指南
+
+### 🔑 核心设计
+
+**Custom Field 为主的关联方式：**
+
+- ✅ 条目名称可以随意修改
+- ✅ 只要 Custom Field `account_id` 正确即可
+- ✅ 防止手误改名导致的问题
+- ✅ 支持优雅的约定命名（`GitHub-{id}`）
 
 ---
 
