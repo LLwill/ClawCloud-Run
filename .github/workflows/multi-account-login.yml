@@ -75,9 +75,6 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: 创建 requirements 文件
-        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
-
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
         id: playwright-cache
@@ -99,10 +96,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local/lib/node_modules/@bitwarden
-          key: bw-cli-${{ runner.os }}
+          key: bw-cli-2026.1.0-${{ runner.os }}
 
       - name: 安装 Bitwarden CLI
-        run: npm install -g @bitwarden/cli
+        run: npm install -g @bitwarden/cli@2026.1.0
 
       - name: 运行自动登录 - ${{ matrix.display_name }}
         env:
@@ -144,9 +141,6 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: 创建 requirements 文件
-        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
-
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
         id: playwright-cache
@@ -168,11 +162,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /usr/local/lib/node_modules/@bitwarden
-          key: bw-cli-${{ runner.os }}
+          key: bw-cli-2026.1.0-${{ runner.os }}
 
       - name: 安装 Bitwarden CLI（可选）
         continue-on-error: true
-        run: npm install -g @bitwarden/cli
+        run: npm install -g @bitwarden/cli@2026.1.0
 
       - name: 运行自动登录（单账号模式）
         env:

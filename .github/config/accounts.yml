@@ -4,23 +4,23 @@
 accounts:
   # 账号 1 示例
   - id: acc1                          # 账号唯一标识符（不可变）
-    display_name: "gmail账号"           # 显示名称（用于日志和通知）
+    display_name: "gmail"           # 显示名称（用于日志和通知）
     enabled: true                      # 是否启用
 
-  # # 账号 2 示例
-  # - id: acc2
-  #   display_name: "工作账号"
-  #   enabled: true
+  # 账号 2 示例
+  - id: acc2
+    display_name: "protonmail"
+    enabled: true
 
-  # # 账号 3 示例
-  # - id: acc3
-  #   display_name: "开源账号"
-  #   enabled: true
+  # 账号 3 示例
+  - id: acc3
+    display_name: "outlook"
+    enabled: true
 
-  # 账号 4 示例（暂时禁用）
-  # - id: acc4
-  #   display_name: "测试账号"
-  #   enabled: false
+  # 账号 4 示例
+  - id: acc4
+    display_name: "will"
+    enabled: true
 
   # 账号 5 示例（暂时禁用）
   # - id: acc5
