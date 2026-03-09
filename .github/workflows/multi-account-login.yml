@@ -69,14 +69,15 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 创建 requirements 文件
+        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
-      - name: 创建 requirements 文件
-        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+          cache-dependency-path: /tmp/requirements.txt
 
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
@@ -138,14 +139,15 @@ jobs:
       - name: 检出代码
         uses: actions/checkout@v4
 
+      - name: 创建 requirements 文件
+        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+
       - name: 设置 Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-
-      - name: 创建 requirements 文件
-        run: echo -e "playwright\nrequests\npynacl" > /tmp/requirements.txt
+          cache-dependency-path: /tmp/requirements.txt
 
       - name: 缓存 Playwright 浏览器
         uses: actions/cache@v4
