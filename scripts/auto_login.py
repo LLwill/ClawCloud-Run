@@ -649,6 +649,10 @@ Secret: {self.session_key}"""
                 except Exception:
                     pass
 
+            # 2FA 完成后，记录当前页面状态
+            current_url = page.url
+            self.log(f"2FA 完成后页面: {current_url}", "INFO")
+
         # 错误
         try:
             err = page.locator('.flash-error').first
@@ -672,26 +676,46 @@ Secret: {self.session_key}"""
     def wait_redirect(self, page, wait=60):
         """等待重定向并检测区域"""
         self.log("等待重定向...", "STEP")
+        last_url = ""
+
         for i in range(wait):
             url = page.url
-            
+
+            # 记录 URL 变化
+            if url != last_url:
+                self.log(f"页面变化: {url}", "INFO")
+                last_url = url
+
             # 检查是否已跳转到 claw.cloud
             if 'claw.cloud' in url and 'signin' not in url.lower():
                 self.log("重定向成功！", "SUCCESS")
-                
+
                 # 检测并记录区域
                 self.detect_region(url)
-                
+
                 return True
-            
+
+            # 处理 OAuth 授权页面
             if 'github.com/login/oauth/authorize' in url:
+                self.log("检测到 OAuth 授权页面，正在处理...", "INFO")
                 self.oauth(page)
-            
+                time.sleep(2)
+                page.wait_for_load_state('networkidle', timeout=30000)
+
+            # 检查是否卡在 GitHub 的某个页面
+            if 'github.com' in url and i > 20:
+                self.log(f"注意: 仍停留在 GitHub: {url}", "WARN")
+                # 尝试截图帮助诊断
+                if i % 10 == 0:
+                    self.shot(page, f"等待重定向_{i}秒")
+
             time.sleep(1)
             if i % 10 == 0:
                 self.log(f"  等待... ({i}秒)")
-        
-        self.log("重定向超时", "ERROR")
+
+        # 超时后提供详细的错误信息
+        self.log(f"重定向超时 - 当前停留在: {page.url}", "ERROR")
+        self.shot(page, "重定向超时最终状态")
         return False
     
     def keepalive(self, page):
@@ -924,16 +948,31 @@ Secret: {self.session_key}"""
                 
                 # 3. GitHub 登录
                 self.log("步骤3: GitHub 认证", "STEP")
-                
+
                 if 'github.com/login' in url or 'github.com/session' in url:
                     if not self.login_github(page, context):
                         self.shot(page, "登录失败")
                         self.notify(False, "GitHub 登录失败")
                         sys.exit(1)
+
+                    # 登录成功后，等待页面稳定并检查状态
+                    time.sleep(3)
+                    page.wait_for_load_state('networkidle', timeout=30000)
+                    current_url = page.url
+                    self.log(f"登录后页面: {current_url}", "INFO")
+                    self.shot(page, "登录完成后")
+
+                    # 如果在 OAuth 页面，处理授权
+                    if 'github.com/login/oauth/authorize' in current_url:
+                        self.log("检测到 OAuth 授权页面", "INFO")
+                        self.oauth(page)
+                        time.sleep(2)
+                        page.wait_for_load_state('networkidle', timeout=30000)
+
                 elif 'github.com/login/oauth/authorize' in url:
                     self.log("Cookie 有效", "SUCCESS")
                     self.oauth(page)
-                
+
                 # 4. 等待重定向（会自动检测区域）
                 self.log("步骤4: 等待重定向", "STEP")
                 if not self.wait_redirect(page):
