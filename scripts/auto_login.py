@@ -916,20 +916,92 @@ Secret: {self.session_key}"""
             
                # 2. 点击 GitHub
                 self.log("步骤2: 点击 GitHub", "STEP")
-                if not self.click(page, [
+
+                # 先截图，看点击前的页面状态
+                self.shot(page, "点击前_页面")
+
+                # 尝试点击 GitHub 按钮
+                github_clicked = False
+                selectors = [
                     'button:has-text("GitHub")',
                     'a:has-text("GitHub")',
-                    '[data-provider="github"]'
-                ], "GitHub"):
-                    self.log("找不到按钮", "ERROR")
+                    '[data-provider="github"]',
+                    'button[type="button"]:has-text("GitHub")',
+                    '.github-button',
+                    '#github-login'
+                ]
+
+                for sel in selectors:
+                    try:
+                        el = page.locator(sel).first
+                        if el.is_visible(timeout=3000):
+                            self.log(f"找到按钮: {sel}", "INFO")
+
+                            # 确保元素可点击
+                            el.scroll_into_view_if_needed()
+                            time.sleep(0.5)
+
+                            # 记录点击前的 URL
+                            url_before = page.url
+                            self.log(f"点击前 URL: {url_before}", "INFO")
+
+                            # 点击并等待导航
+                            try:
+                                # 使用 expect_navigation 来捕获页面跳转
+                                with page.expect_navigation(timeout=10000):
+                                    el.click()
+                                    self.log(f"已点击并检测到导航: {sel}", "SUCCESS")
+                                github_clicked = True
+                            except Exception as nav_error:
+                                # 如果没有导航，可能是在同一页面或新窗口
+                                self.log(f"点击后无导航事件: {nav_error}", "WARN")
+                                el.click()
+                                github_clicked = True
+                                time.sleep(3)
+
+                                # 检查是否有新窗口
+                                pages = context.pages
+                                if len(pages) > 1:
+                                    self.log(f"检测到 {len(pages)} 个页面，使用新页面", "INFO")
+                                    page = pages[-1]  # 使用最新的页面
+                                    page.wait_for_load_state('domcontentloaded', timeout=30000)
+
+                            # 等待一下确保页面稳定
+                            time.sleep(2)
+
+                            # 检查 URL 是否变化
+                            url_after = page.url
+                            self.log(f"点击后 URL: {url_after}", "INFO")
+
+                            if url_before != url_after or 'github.com' in url_after:
+                                self.log("跳转成功", "SUCCESS")
+                            else:
+                                self.log("警告: URL 未变化，可能点击未生效", "WARN")
+                                # 尝试等待更长时间
+                                time.sleep(5)
+                                self.log(f"再次检查 URL: {page.url}", "INFO")
+
+                            break
+                    except Exception as e:
+                        self.log(f"选择器 {sel} 失败: {e}", "WARN")
+                        continue
+
+                if not github_clicked:
+                    self.log("找不到 GitHub 按钮", "ERROR")
+                    self.shot(page, "找不到按钮")
                     self.notify(False, "找不到 GitHub 按钮")
                     sys.exit(1)
-                
-                time.sleep(3)
-                page.wait_for_load_state('networkidle', timeout=120000)
-                self.shot(page, "点击后")
+
+                # 等待页面加载
+                time.sleep(5)  # 增加等待时间
+                try:
+                    page.wait_for_load_state('networkidle', timeout=30000)
+                except Exception as e:
+                    self.log(f"等待 networkidle 超时: {e}", "WARN")
+
+                self.shot(page, "点击后_最终")
                 url = page.url
-                self.log(f"当前: {url}")
+                self.log(f"最终 URL: {url}")
 
                 if 'signin' not in url.lower() and 'claw.cloud' in url and  'github.com' not in url:
                     self.log("已登录！", "SUCCESS")
