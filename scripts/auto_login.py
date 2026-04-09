@@ -992,8 +992,45 @@ Secret: {self.session_key}"""
                     self.notify(False, "找不到 GitHub 按钮")
                     sys.exit(1)
 
-                # 等待页面加载
-                time.sleep(5)  # 增加等待时间
+                # 检查点击后的 URL
+                time.sleep(2)
+                current_url = page.url
+                self.log(f"点击 2 秒后 URL: {current_url}")
+
+                # 如果到达 callback 页面，需要等待它处理
+                if '/callback' in current_url:
+                    self.log("检测到 callback 页面，等待处理...", "INFO")
+                    self.shot(page, "callback_页面")
+
+                    # 监控 callback 处理过程（最多等待 30 秒）
+                    for i in range(30):
+                        time.sleep(1)
+                        url_now = page.url
+
+                        # 检查是否完成处理
+                        if '/callback' not in url_now:
+                            self.log(f"Callback 处理完成，当前: {url_now}", "INFO")
+                            break
+
+                        # 每 5 秒打印一次
+                        if i % 5 == 0 and i > 0:
+                            self.log(f"  Callback 处理中... ({i}秒)")
+
+                        # 检查页面是否有错误
+                        try:
+                            error_el = page.locator('.error, .alert-error, [role="alert"]').first
+                            if error_el.is_visible(timeout=500):
+                                error_text = error_el.inner_text()
+                                self.log(f"Callback 错误: {error_text}", "ERROR")
+                                self.shot(page, "callback_错误")
+                                break
+                        except Exception:
+                            pass
+
+                    self.shot(page, "callback_处理后")
+
+                # 等待页面稳定
+                time.sleep(3)
                 try:
                     page.wait_for_load_state('networkidle', timeout=30000)
                 except Exception as e:
