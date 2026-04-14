@@ -526,51 +526,58 @@ Secret: {self.session_key}"""
         for sel in selectors:
             try:
                 el = page.locator(sel).first
-                if el.is_visible(timeout=2000):
-                    el.click()
-                    time.sleep(random.uniform(0.2, 0.5))
-                    el.type(code, delay=random.randint(50, 150))
-                    self.log(f"已填入验证码", "SUCCESS")
-                    time.sleep(1)
-
-                    # 优先点击 Verify 按钮，不行再 Enter
-                    submitted = False
-                    verify_btns = [
-                        'button:has-text("Verify")',
-                        'button[type="submit"]',
-                        'input[type="submit"]'
-                    ]
-                    for btn_sel in verify_btns:
-                        try:
-                            btn = page.locator(btn_sel).first
-                            if btn.is_visible(timeout=1000):
-                                btn.click()
-                                submitted = True
-                                self.log("已点击 Verify 按钮", "SUCCESS")
-                                break
-                        except Exception:
-                            pass
-
-                    if not submitted:
-                        time.sleep(random.uniform(0.3, 0.8))
-                        page.keyboard.press("Enter")
-                        self.log("已按 Enter 提交", "SUCCESS")
-
-                    time.sleep(3)
-                    page.wait_for_load_state('networkidle', timeout=30000)
-                    self.shot(page, "验证码提交后")
-
-                    # 检查是否通过
-                    if "github.com/sessions/two-factor/" not in page.url:
-                        self.log("验证码验证通过！", "SUCCESS")
-                        self.tg.send("✅ <b>验证码验证通过</b>")
-                        return True
-                    else:
-                        self.log("验证码可能错误", "ERROR")
-                        self.tg.send("❌ <b>验证码可能错误，请检查后重试</b>")
-                        return False
+                if not el.is_visible(timeout=2000):
+                    continue
             except Exception:
-                pass
+                continue
+
+            # 找到输入框，从这里开始不再捕获异常让循环继续
+            try:
+                el.click()
+                time.sleep(random.uniform(0.2, 0.5))
+                el.type(code, delay=random.randint(50, 150))
+                self.log(f"已填入验证码（selector: {sel}）", "SUCCESS")
+                time.sleep(1)
+
+                # 优先点击 Verify 按钮，不行再 Enter
+                submitted = False
+                verify_btns = [
+                    'button:has-text("Verify")',
+                    'button[type="submit"]',
+                    'input[type="submit"]'
+                ]
+                for btn_sel in verify_btns:
+                    try:
+                        btn = page.locator(btn_sel).first
+                        if btn.is_visible(timeout=1000):
+                            btn.click()
+                            submitted = True
+                            self.log("已点击 Verify 按钮", "SUCCESS")
+                            break
+                    except Exception:
+                        pass
+
+                if not submitted:
+                    time.sleep(random.uniform(0.3, 0.8))
+                    page.keyboard.press("Enter")
+                    self.log("已按 Enter 提交", "SUCCESS")
+
+                time.sleep(3)
+                page.wait_for_load_state('networkidle', timeout=30000)
+                self.shot(page, "验证码提交后")
+
+                # 检查是否通过
+                if "github.com/sessions/two-factor/" not in page.url:
+                    self.log("验证码验证通过！", "SUCCESS")
+                    self.tg.send("✅ <b>验证码验证通过</b>")
+                    return True
+                else:
+                    self.log("验证码可能错误", "ERROR")
+                    self.tg.send("❌ <b>验证码可能错误，请检查后重试</b>")
+                    return False
+            except Exception as e:
+                self.log(f"填入验证码时出错: {e}", "ERROR")
+                return False
 
         self.log("没找到验证码输入框", "ERROR")
         self.tg.send("❌ <b>没找到验证码输入框</b>")
@@ -1058,7 +1065,7 @@ Secret: {self.session_key}"""
                 # 3. GitHub 登录
                 self.log("步骤3: GitHub 认证", "STEP")
 
-                if 'github.com/login' in url or 'github.com/session' in url:
+                if ('github.com/login' in url and 'oauth/authorize' not in url) or 'github.com/session' in url:
                     if not self.login_github(page, context):
                         self.shot(page, "登录失败")
                         self.notify(False, "GitHub 登录失败")
