@@ -563,7 +563,10 @@ Secret: {self.session_key}"""
                     self.log("已按 Enter 提交", "SUCCESS")
 
                 time.sleep(3)
-                page.wait_for_load_state('networkidle', timeout=30000)
+                try:
+                    page.wait_for_load_state('networkidle', timeout=15000)
+                except Exception:
+                    pass  # networkidle 超时是正常的，跳转成功后某些请求仍活跃
                 self.shot(page, "验证码提交后")
 
                 # 检查是否通过
@@ -678,7 +681,10 @@ Secret: {self.session_key}"""
             self.shot(page, "oauth")
             self.click(page, ['button[name="authorize"]', 'button:has-text("Authorize")'], "授权")
             time.sleep(3)
-            page.wait_for_load_state('networkidle', timeout=30000)
+            try:
+                page.wait_for_load_state('networkidle', timeout=15000)
+            except Exception:
+                pass  # 授权跳转后 networkidle 可能超时，忽略
     
     def wait_redirect(self, page, wait=60):
         """等待重定向并检测区域"""
@@ -1004,8 +1010,8 @@ Secret: {self.session_key}"""
                 current_url = page.url
                 self.log(f"点击 2 秒后 URL: {current_url}")
 
-                # 如果到达 callback 页面，需要等待它处理
-                if '/callback' in current_url:
+                # 如果到达 callback 页面，需要等待它处理（排除 oauth/authorize 中 redirect_uri 参数含 callback 的情况）
+                if 'claw.cloud/callback' in current_url or (current_url.split('?')[0].endswith('/callback')):
                     self.log("检测到 callback 页面，等待处理...", "INFO")
                     self.shot(page, "callback_页面")
 
